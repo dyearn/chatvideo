@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>ChatVideo</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+        }
+
+        .container {
+            max-width: 400px;
+            margin: 10px auto;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+
+        .preview {
+            width: 100%;
+            height: auto;
+            margin-top: 10px;
+            margin-bottom: 10px;
+        }
+
+        h3 {
+            margin-block-start: 10px;
+            margin-block-end: 10px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h2 style="text-align:center"> ChatVideo </h2>
+        <p style="text-align:center;font-size:10px;color:grey">由点漾科技(深圳)有限公司提供demo演示</p>
+        <h3>已学视频<span style="font-size:12px;color:rebeccapurple">（您可以选择任意一个视频开始）</span></h3>
+        <ul id="fileList"></ul>
+        <h3>上传视频<span style="font-size:12px;color:rebeccapurple">（您可以选择上传一个新视频）</span></h3>
+        <input type="file" id="fileInput" accept="video/*">
+        <br>
+        <button onclick="uploadAndPreview()" style="margin-top:10px">上传给AI学习</button>
+        <span id="train_status" style="margin-top:10px;color:red"></span>
+        <hr>
+        <div id="listSelectedFile" style="margin-top:10px;text-align:center;"></div>
+       
+        <video controls class="preview" id="videoPreview"></video>
+        <p id="video_summary" style="margin-top:10px;color:red;font-size:12px"></p>
+        <hr>
+
+        <span id="request_status" style="margin-top:10px;color:blue"></span>
+        <h3>问题咨询</h3>
+        <input type="text" id="questionInput" placeholder="请输入问题" style="height:40px;width:100%">
+        <br>
+        <button onclick="askQuestion()" style="margin-top:10px;">提问</button>
+        <div id="answer" style="margin-top:15px;font-size:12px"></div>
+        <hr>
+
+        <h3>开始测试</h3>
+        <button onclick="generateQA()" style="margin-top:10px">生成考题</button>
+        <button onclick="showAnswer()" style="margin-top:10px">显示答案</button>
+        <br>
+
+        <div id="result" style="margin-top:15px"></div>
+    </div>
+
+    <script>
+        let url = "http://127.0.0.1:5002"
+        let share_url = "http://127.0.0.1"
+        let current_filename = ""
+        let isTraining = false
+        let isRequest = false
+        let isChecking = false
+        //初始化即开始执行一次
+        updateCurrentStatus()
+        // 每隔 1000 毫秒（1 秒）执行一次
+        setInterval(function () {
+            updateCurrentStatus()
+        }, 1000);
+        // 从后台获取状态
+        function updateCurrentStatus() {
+            // 定时check状态
+            if (current_filename == "") {
+                return
+            }
+            if (isChecking) {
+                return
+            }
+            isChecking = true
+            fetch(`${url}/check_status/${current_filename}`, {
+                method: 'GET'
+            })
+                .then(response => response.json())
+                .then(data => {
+                    console.log(data)
+                    num = data.result;
+                    summary = data.summary
+                    document.getElementById("video_summary").innerText = summary
+                    if (num == "-1") {
+                        if (!isTraining) {
+                            document.getElementById("train_status").innerText = "新文件，AI需要学习"
+                        } else {
+                            document.getElementById("train_status").innerText = "AI处理中（视频上传中...）"
+                        }
+                    } else if (num == "0") {
+                        document.getElementById("train_status").innerText = "AI处理中（文件已经上传）"
+                        isTraining = true
+                    } else if (num == "1") {
+                        document.getElementById("train_status").innerText = "AI处理中（开始拆解视频）"
+                        isTraining = true
+                    } else if (num == "2") {
+                        document.getElementById("train_status").innerText = "AI处理中（视频分拆解完成）"
+                        isTraining = true
+                    } else if (num == "3") {
+                        document.getElementById("train_status").innerText = "AI处理中（开始分析音频）"
+                        isTraining = true
+                    } else if (num == "4") {
+                        document.getElementById("train_status").innerText = "AI处理中（音频分析完成）"
+                        isTraining = true
+                    } else if (num.startsWith("5")) {
+                        if (num.indexOf("_") !== -1) {
+                            var parts = num.split("_");
+                            document.getElementById("train_status").innerText = "AI处理中（开始分析视频——" + parts[1] + "）"
+                        } else {
+                            document.getElementById("train_status").innerText = "AI处理中（开始分析视频）"
+                        }
+                        isTraining = true
+                    } else if (num == "6") {
+                        document.getElementById("train_status").innerText = "AI处理中（已分析完视频）"
+                        isTraining = true
+                    } else if (num == "7") {
+                        document.getElementById("train_status").innerText = "AI处理中（已摘要完视频）"
+                        isTraining = true
+                    } else if (num == "8") {
+                        document.getElementById("train_status").innerText = "AI学习已完成"
+                        isTraining = false
+                    } else {
+                        document.getElementById("train_status").innerText = "未知状态"
+                        isTraining = false
+                    }
+                    isChecking = false
+                })
+                .catch(error => {
+                    console.error(error)
+                    isChecking = false
+                });
+        }
+        document.getElementById('fileInput').addEventListener('change', function (event) {
+            if (isTraining) {
+                alert('AI正在学习中，请稍后操作');
+                let fileInput = document.getElementById('fileInput');
+                fileInput.value = '';
+                return
+            }
+            if (isRequest) {
+                alert('AI正在思考您的问题，请稍后操作');
+                let fileInput = document.getElementById('fileInput');
+                fileInput.value = '';
+                return
+            }
+
+            const fileList = event.target.files;
+            isTraining = false
+            isRequest = false
+            updateTrainningStatus()
+            // 清空以前的显示
+            document.getElementById("video_summary").innerText = ""
+            document.getElementById('answer').innerText = ""
+            document.getElementById('result').innerHTML = "";
+
+            if (fileList.length > 0) {
+                const selectedFile = fileList[0];
+                current_filename = selectedFile.name
+                const listSelectedFileElement = document.getElementById('listSelectedFile');
+                listSelectedFileElement.innerHTML = `<span style="color:red">当前选择的文件：${current_filename}</span>`;
+
+                let video = document.getElementById('videoPreview');
+                let reader = new FileReader();
+                reader.onload = function (e) {
+                    video.src = e.target.result;
+                };
+                reader.readAsDataURL(selectedFile);
+            } else {
+                current_filename = ""
+                const listSelectedFileElement = document.getElementById('listSelectedFile');
+                listSelectedFileElement.innerHTML = `<span style="color:black">未选中文件</span>`;
+                let video = document.getElementById('videoPreview');
+                video.src = "";
+            }
+        });
+
+        function selectFile(file) {
+            if (isTraining) {
+                alert('AI正在学习中，请稍后操作');
+                return
+            }
+            if (isRequest) {
+                alert('AI正在思考您的问题，请稍后操作');
+                return
+            }
+
+            isTraining = false
+            isRequest = false
+            updateTrainningStatus()
+            // 清空以前的显示
+            document.getElementById("video_summary").innerText = ""
+            document.getElementById('answer').innerText = ""
+            document.getElementById('result').innerHTML = "";
+
+            current_filename = `${file}`
+            const listSelectedFileElement = document.getElementById('listSelectedFile');
+            listSelectedFileElement.innerHTML = `<span style="color:red">当前选择的文件：${current_filename}</span>`;
+
+            let fileInput = document.getElementById('fileInput');
+            fileInput.value = '';
+
+            let video = document.getElementById('videoPreview');
+            video.src = share_url + "/" + `${file}`;
+        }
+
+        // 页面加载完成后调用getFiles方法获取文件列表
+        document.addEventListener('DOMContentLoaded', () => {
+            getFiles();
+        });
+
+        function getFiles() {
+            isRequest = true
+            updateRequestStatus()
+            fetch(`${url}/get_list`)
+                .then(response => response.json())
+                .then(data => {
+                    const fileListElement = document.getElementById('fileList');
+                    fileListElement.innerHTML = '';
+                    data.sort(); // 按照首字母排序
+
+                    data.forEach(file => {
+                        const li = document.createElement('li');
+                        li.innerHTML = `${file}<span id="${file}" style="color:blue;cursor:pointer;text-decoration:underline;">（选择我可以开始）</span></hr><hr>`;
+                        li.style = "margin-top:15px"
+
+                        li.addEventListener('click', () => selectFile(file));
+                        fileListElement.appendChild(li);
+                    });
+                    isRequest = false
+                    updateRequestStatus()
+                })
+                .catch(error => {
+                    console.error(error)
+                    alert(error.message)
+
+                    isRequest = false
+                    updateRequestStatus()
+                });;
+        }
+        function uploadAndPreview() {
+            if (isTraining) {
+                alert('AI正在学习中，请稍后操作');
+                return
+            }
+            if (isRequest) {
+                alert('AI正在思考您的问题，请稍后操作');
+                return
+            }
+
+
+            let fileInput = document.getElementById('fileInput');
+            let file = fileInput.files[0];
+
+            if (!file) {
+                alert('请选择一个视频文件');
+                isTraining = false
+                return;
+            }
+
+            if (!file.type.startsWith('video/')) {
+                alert('请选择一个视频文件');
+                isTraining = false
+                return;
+            }
+
+            current_filename = file.name
+            const listSelectedFileElement = document.getElementById('listSelectedFile');
+            listSelectedFileElement.innerHTML = `<span style="color:red">已选中文件：${current_filename}</span>`;
+
+            let formData = new FormData();
+            formData.append('file', file);
+            isTraining = true
+            updateTrainningStatus()
+
+            isRequest = true
+            updateRequestStatus()
+            // 清空以前的显示
+            document.getElementById("video_summary").innerText = ""
+            document.getElementById('answer').innerText = ""
+            document.getElementById('result').innerHTML = "";
+
+            fetch(`${url}/upload`, {
+                method: 'POST',
+                body: formData
+            })
+                .then(response => response.json())
+                .then(data => {
+                    console.log(data)
+                    isTraining = false
+                    updateTrainningStatus()
+
+                    isRequest = false
+                    updateRequestStatus()
+                })
+                .catch(error => {
+                    console.error(error)
+                    alert(error.message)
+                    isTraining = false
+                    updateTrainningStatus()
+
+                    isRequest = false
+                    updateRequestStatus()
+                });
+        }
+
+        function askQuestion() {
+            if (isTraining) {
+                alert('AI正在学习中，请稍后操作');
+                return
+            }
+            if (isRequest) {
+                alert('AI正在思考您的问题，请稍后操作');
+                return
+            }
+            let question = document.getElementById('questionInput').value;
+
+            if (current_filename == "") {
+                alert('您尚未选中视频文件');
+                return
+            }
+            if (question == "") {
+                alert('您的问题为空');
+                return
+            }
+            isRequest = true
+            updateRequestStatus()
+            document.getElementById('answer').innerText = ""
+
+            let formData = new FormData();
+            formData.append('filename', current_filename);
+            formData.append('question', question);
+
+            fetch(`${url}/ask_file`, {
+                method: 'POST',
+                body: formData
+            })
+                .then(response => response.json())
+                .then(data => {
+                    console.log(data)
+                    let result = document.getElementById('answer');
+                    result.innerText = data.result;
+                    isRequest = false
+                    updateRequestStatus()
+                })
+                .catch(error => {
+                    console.error(error)
+                    let result = document.getElementById('answer');
+                    result.innerText = "";
+                    alert(error.message)
+
+                    isRequest = false
+                    updateRequestStatus()
+                });
+        }
+
+        function generateQA() {
+            if (isTraining) {
+                alert('AI正在学习中，请稍后操作');
+                return
+            }
+            if (isRequest) {
+                alert('AI正在思考您的问题，请稍后操作');
+                return
+            }
+
+            if (current_filename == "") {
+                alert('您尚未选中视频文件');
+                return
+            }
+            isRequest = true
+            updateRequestStatus()
+            document.getElementById('result').innerHTML = "";
+
+            fetch(`${url}/generate_qa/${current_filename}`, {
+                method: 'GET'
+            })
+                .then(response => response.json())
+                .then(data => {
+                    console.log(data)
+                    str = data.result
+
+                    const pairs = str.split('\n\n').map(pair => {
+                        const [question, answer] = pair.split('\n');
+                        return { question: question.replace('问题：', ''), answer: answer.replace('答案：', '') };
+                    });
+                    const allQuestionsWithNumbers = pairs.map((pair, index) => `<span style="font-weight:bold;font-size:12px">问题${index + 1}: ${pair.question}</span>`).join('<br><br>');
+                    let result = document.getElementById('result');
+                    result.innerHTML = allQuestionsWithNumbers;
+
+                    isRequest = false
+                    updateRequestStatus()
+                })
+                .catch(error => {
+                    console.error(error)
+                    alert(error.message)
+                    isRequest = false
+                    updateRequestStatus()
+                });
+        }
+
+        function showAnswer() {
+            if (isTraining) {
+                alert('AI正在学习中，请稍后操作');
+                return
+            }
+            if (isRequest) {
+                alert('AI正在思考您的问题，请稍后操作');
+                return
+            }
+
+            if (current_filename == "") {
+                alert('您尚未选中视频文件');
+                return
+            }
+            isRequest = true
+            updateRequestStatus()
+
+            document.getElementById('result').innerHTML = "";
+
+            fetch(`${url}/generate_qa/${current_filename}`, {
+                method: 'GET'
+            })
+                .then(response => response.json())
+                .then(data => {
+                    console.log(data)
+                    str = data.result
+
+                    const pairs = str.split('\n\n').map(pair => {
+                        const [question, answer] = pair.split('\n');
+                        return { question: question.replace('问题：', ''), answer: answer.replace('答案：', '') };
+                    });
+                    const allQuestionsWithNumbers = pairs.map((pair, index) => `<span style="font-weight:bold;font-size:12px">问题${index + 1}: ${pair.question}</span><br><span style="color:red;font-size:12px">答案：${pair.answer}</span>`).join('<br><br>');
+                    let result = document.getElementById('result');
+                    result.innerHTML = allQuestionsWithNumbers;
+
+                    isRequest = false
+                    updateRequestStatus()
+                })
+                .catch(error => {
+                    console.error(error)
+                    alert(error.message)
+                    isRequest = false
+                    updateRequestStatus()
+                });
+        }
+
+        function updateRequestStatus() {
+            if (isRequest) {
+                document.getElementById("request_status").innerText = "AI正在思考中，请勿操作"
+            } else {
+                document.getElementById("request_status").innerText = ""
+            }
+        }
+        function updateTrainningStatus() {
+            if (isTraining) {
+                document.getElementById("train_status").innerText = "AI正在学习中，请勿操作"
+            } else {
+                document.getElementById("train_status").innerText = ""
+            }
+        }
+    </script>
+</body>
+
+</html>
